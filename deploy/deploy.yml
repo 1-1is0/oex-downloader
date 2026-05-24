@@ -1,0 +1,38 @@
+---
+- name: Update and redeploy iwouldliketopay stack
+  hosts: boil-ubu
+  gather_facts: false
+  vars:
+    project_src: "{{ playbook_dir }}/.."
+    project_dst: "{{ remote_path | default('/opt/iwouldliketopay') }}"
+
+  tasks:
+    - name: Ensure remote project directory exists
+      ansible.builtin.file:
+        path: "{{ project_dst }}"
+        state: directory
+        mode: "0755"
+
+    - name: Sync project files (respecting .gitignore)
+      ansible.posix.synchronize:
+        src: "{{ project_src }}/"
+        dest: "{{ project_dst }}/"
+        delete: false
+        recursive: true
+        rsync_opts:
+          - "--filter=:- .gitignore"
+          - "--exclude=.git"
+          - "--exclude=.claude"
+          - "--exclude=deploy"
+
+    - name: Pull latest container images
+      community.docker.docker_compose_v2:
+        project_src: "{{ project_dst }}"
+        pull: always
+        state: present
+      register: compose_result
+
+    - name: Show compose result
+      ansible.builtin.debug:
+        var: compose_result.services
+      when: compose_result is defined

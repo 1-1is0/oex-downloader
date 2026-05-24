@@ -1,0 +1,103 @@
+{
+  "log": {
+    "loglevel": "warning",
+    "access": "",
+    "error": ""
+  },
+
+  "inbounds": [
+    {
+      "tag": "socks-in",
+      "protocol": "socks",
+      "listen": "0.0.0.0",
+      "port": 1080,
+      "settings": {
+        "auth": "password",
+        "accounts": [
+          {
+            "user": "abcuser",
+            "pass": "phu1TeechaoPheiM"
+          }
+        ],
+        "udp": true,
+        "ip": "0.0.0.0"
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": ["http", "tls", "quic"],
+        "routeOnly": false
+      }
+    }
+  ],
+
+  "outbounds": [
+    {
+      "tag": "socks-out",
+      "protocol": "socks",
+      "settings": {
+        "servers": [
+          {
+            "address": "YOUR_UPSTREAM_SOCKS5_HOST_OR_IP",
+            "port": 1,
+            "users": [
+              {
+                "user": "YOUR_UPSTREAM_USER",
+                "pass": "YOUR_UPSTREAM_PASS",
+                "level": 0
+              }
+            ]
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "sockopt": {
+          "domainStrategy": "UseIP"
+        }
+      }
+    },
+    {
+      "tag": "direct",
+      "protocol": "freedom",
+      "settings": {}
+    },
+    {
+      "tag": "block",
+      "protocol": "blackhole",
+      "settings": {}
+    }
+  ],
+
+  "routing": {
+    "domainStrategy": "AsIs",
+    "rules": [
+      {
+        "type": "field",
+        "ip": ["geoip:private"],
+        "outboundTag": "direct"
+      },
+      {
+        "type": "field",
+        "network": "tcp,udp",
+        "outboundTag": "socks-out"
+      }
+    ]
+  },
+
+  "dns": {
+    "servers": [
+      "https://1.1.1.1/dns-query",
+      "https://8.8.8.8/dns-query"
+    ],
+    "queryStrategy": "UseIPv4",
+    "disableCache": false,
+    "tag": "dns-out"
+  },
+
+  "policy": {
+    "levels": {
+      "0": { "handshakeMSeconds": 4000, "connIdle": 300 }
+    },
+    "system": { "statsInboundUplink": false, "statsInboundDownlink": false }
+  }
+}

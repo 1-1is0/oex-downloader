@@ -1,0 +1,17 @@
+.env
+config/xray-config.json
+data/**
+!data/
+!data/xray/
+!data/xray-lab/
+!data/qbittorrent/
+!data/qbittorrent/config/
+!data/qbittorrent/config/qBittorrent/
+!data/downloads/
+!data/**/.gitkeep
+links.txt
+links.back.txt
+__pycache__/
+xray-linux-64
+config/
+.antigravitycli/

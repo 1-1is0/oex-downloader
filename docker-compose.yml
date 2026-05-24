@@ -1,0 +1,139 @@
+services:
+  xray:
+    build:
+      context: .
+      dockerfile: ./scripts/Dockerfile.xray
+    container_name: xray
+    restart: unless-stopped
+    networks:
+      - proxy-net
+    ports:
+      - "127.0.0.1:11080:1080"
+    volumes:
+      - ./config/xray-config.json:/etc/xray/config.json:ro
+      - ./scripts/test-nodes.sh:/usr/local/bin/test-nodes.sh:ro
+      - ./data/xray:/var/run/xray
+    command: ["-config", "/etc/xray/config.json"]
+    read_only: true
+    tmpfs:
+      - /tmp
+    logging:
+      driver: json-file
+      options:
+        max-size: "${LOG_MAX_SIZE}"
+        max-file: "${LOG_MAX_FILE}"
+
+  xray-lab:
+    build:
+      context: .
+      dockerfile: ./scripts/Dockerfile.xray
+    container_name: xray-lab
+    restart: unless-stopped
+    networks:
+      - proxy-net
+    volumes:
+      - ./config/xray-lab-config.json:/etc/xray/config.json:ro
+      - ./scripts/test-nodes.sh:/usr/local/bin/test-nodes.sh:ro
+      - ./data/xray-lab:/var/run/xray
+    command: ["-config", "/etc/xray/config.json"]
+    read_only: true
+    tmpfs:
+      - /tmp
+    logging:
+      driver: json-file
+      options:
+        max-size: "${LOG_MAX_SIZE}"
+        max-file: "${LOG_MAX_FILE}"
+
+  tun2socks:
+    image: ghcr.io/xjasonlyu/tun2socks:latest
+    container_name: tun2socks
+    restart: unless-stopped
+    depends_on:
+      xray:
+        condition: service_started
+    networks:
+      - proxy-net
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    sysctls:
+      - net.ipv6.conf.all.disable_ipv6=1
+      - net.ipv6.conf.default.disable_ipv6=1
+    ports:
+      - "127.0.0.1:${WEBUI_PORT}:8080"
+    environment:
+      LOGLEVEL: "warn"
+      TUN: "${TUN_NAME}"
+      PROXY: "${SOCKS5_PROXY_URL}"
+      VPS_PUBLIC_IP: "${VPS_PUBLIC_IP}"
+      EXTRA_COMMANDS: >-
+        GW=$$(ip route | awk '/^default/ {print $$3; exit}') &&
+        ip route del default &&
+        ip route add default dev ${TUN_NAME} &&
+        ip route add 172.16.0.0/12 via $$GW &&
+        ip route add 10.0.0.0/8 via $$GW &&
+        ip route add 192.168.0.0/16 via $$GW
+    volumes:
+      - ./scripts/healthcheck-proxy.sh:/scripts/healthcheck-proxy.sh:ro
+    healthcheck:
+      test: ["CMD", "sh", "/scripts/healthcheck-proxy.sh"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 25s
+    logging:
+      driver: json-file
+      options:
+        max-size: "${LOG_MAX_SIZE}"
+        max-file: "${LOG_MAX_FILE}"
+
+  qbittorrent:
+    image: qbittorrentofficial/qbittorrent-nox:latest
+    container_name: qbittorrent
+    restart: unless-stopped
+    depends_on:
+      tun2socks:
+        condition: service_healthy
+    network_mode: "service:tun2socks"
+    environment:
+      QBT_LEGAL_NOTICE: "confirm"
+      QBT_WEBUI_PORT: "8080"
+      PUID: "${PUID}"
+      PGID: "${PGID}"
+    volumes:
+      - ./data/qbittorrent/config:/config
+      - ${DOWNLOADS_PATH}:/downloads
+    logging:
+      driver: json-file
+      options:
+        max-size: "${LOG_MAX_SIZE}"
+        max-file: "${LOG_MAX_FILE}"
+
+  downloader:
+    build:
+      context: ./scripts/downloader
+      dockerfile: Dockerfile
+    container_name: downloader
+    restart: unless-stopped
+    depends_on:
+      tun2socks:
+        condition: service_healthy
+    network_mode: "service:tun2socks"
+    volumes:
+      - ./links.txt:/app/links.txt
+      - ./data/downloader:/data
+      - ${DOWNLOADS_PATH}:/downloads
+    logging:
+      driver: json-file
+      options:
+        max-size: "${LOG_MAX_SIZE}"
+        max-file: "${LOG_MAX_FILE}"
+
+networks:
+  proxy-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
