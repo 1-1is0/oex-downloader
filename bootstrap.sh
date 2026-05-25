@@ -2,12 +2,11 @@
 # One-time setup: ensure xray-config.json and qBittorrent.conf exist, then write .env.
 set -eu
 
-SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
-ROOT_DIR=$(cd "$SCRIPT_DIR/.." && pwd)
+ROOT_DIR=$(cd "$(dirname "$0")" && pwd)
 
-XRAY_TPL="$ROOT_DIR/config/xray-config.json.example"
-XRAY_CFG="$ROOT_DIR/config/xray-config.json"
-QBT_TPL="$ROOT_DIR/config/qbittorrent.conf"
+XRAY_TPL="$ROOT_DIR/xray/xray-config.json.example"
+XRAY_CFG="$ROOT_DIR/xray/xray-config.json"
+QBT_TPL="$ROOT_DIR/qbittorrent/qbittorrent.conf"
 QBT_DST_DIR="$ROOT_DIR/data/qbittorrent/config/qBittorrent"
 QBT_DST="$QBT_DST_DIR/qBittorrent.conf"
 
@@ -24,5 +23,5 @@ fi
 
 mkdir -p "$ROOT_DIR/data/xray" "$ROOT_DIR/data/downloads"
 
-sh "$SCRIPT_DIR/generate-env.sh"
+sh "$ROOT_DIR/generate-env.sh"
 echo "Bootstrap complete. Next: docker compose up -d"

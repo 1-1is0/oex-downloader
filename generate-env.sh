@@ -2,9 +2,8 @@
 # Read config/stack-settings.json and write .env at repo root.
 set -eu
 
-SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
-ROOT_DIR=$(cd "$SCRIPT_DIR/.." && pwd)
-CFG="$ROOT_DIR/config/stack-settings.json"
+ROOT_DIR=$(cd "$(dirname "$0")" && pwd)
+CFG="$ROOT_DIR/stack-settings.json"
 ENV_FILE="$ROOT_DIR/.env"
 
 if [ ! -f "$CFG" ]; then

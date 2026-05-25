@@ -1,8 +1,8 @@
 services:
   xray:
     build:
-      context: .
-      dockerfile: ./scripts/Dockerfile.xray
+      context: ./xray
+      dockerfile: Dockerfile.xray
     container_name: xray
     restart: unless-stopped
     networks:
@@ -10,8 +10,8 @@ services:
     ports:
       - "127.0.0.1:11080:1080"
     volumes:
-      - ./config/xray-config.json:/etc/xray/config.json:ro
-      - ./scripts/test-nodes.sh:/usr/local/bin/test-nodes.sh:ro
+      - ./xray/xray-config.json:/etc/xray/config.json:ro
+      - ./xray/test-nodes.sh:/usr/local/bin/test-nodes.sh:ro
       - ./data/xray:/var/run/xray
     command: ["-config", "/etc/xray/config.json"]
     read_only: true
@@ -22,18 +22,23 @@ services:
       options:
         max-size: "${LOG_MAX_SIZE}"
         max-file: "${LOG_MAX_FILE}"
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "1080"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
   xray-lab:
     build:
-      context: .
-      dockerfile: ./scripts/Dockerfile.xray
+      context: ./xray
+      dockerfile: Dockerfile.xray
     container_name: xray-lab
     restart: unless-stopped
     networks:
       - proxy-net
     volumes:
-      - ./config/xray-lab-config.json:/etc/xray/config.json:ro
-      - ./scripts/test-nodes.sh:/usr/local/bin/test-nodes.sh:ro
+      - ./xray/xray-lab-config.json:/etc/xray/config.json:ro
+      - ./xray/test-nodes.sh:/usr/local/bin/test-nodes.sh:ro
       - ./data/xray-lab:/var/run/xray
     command: ["-config", "/etc/xray/config.json"]
     read_only: true
@@ -44,6 +49,11 @@ services:
       options:
         max-size: "${LOG_MAX_SIZE}"
         max-file: "${LOG_MAX_FILE}"
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "1080"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
   tun2socks:
     image: ghcr.io/xjasonlyu/tun2socks:latest
@@ -76,7 +86,7 @@ services:
         ip route add 10.0.0.0/8 via $$GW &&
         ip route add 192.168.0.0/16 via $$GW
     volumes:
-      - ./scripts/healthcheck-proxy.sh:/scripts/healthcheck-proxy.sh:ro
+      - ./tun2socks/healthcheck-proxy.sh:/scripts/healthcheck-proxy.sh:ro
     healthcheck:
       test: ["CMD", "sh", "/scripts/healthcheck-proxy.sh"]
       interval: 30s
@@ -110,19 +120,25 @@ services:
       options:
         max-size: "${LOG_MAX_SIZE}"
         max-file: "${LOG_MAX_FILE}"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "http://127.0.0.1:8080"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
   downloader:
     build:
-      context: ./scripts/downloader
+      context: ./downloader
       dockerfile: Dockerfile
     container_name: downloader
+    user: "${PUID}:${PGID}"
     restart: unless-stopped
     depends_on:
       tun2socks:
         condition: service_healthy
     network_mode: "service:tun2socks"
     volumes:
-      - ./links.txt:/app/links.txt
+      - .:/app_root
       - ./data/downloader:/data
       - ${DOWNLOADS_PATH}:/downloads
     logging:

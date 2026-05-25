@@ -70,6 +70,17 @@ def parse_vless(uri):
 
         q = dict(urllib.parse.parse_qsl(query))
         
+        security = q.get("security", "none")
+        if security not in ["none", "tls", "reality"]:
+            return None
+            
+        network = q.get("type", "tcp")
+        if network not in ["tcp", "kcp", "ws", "http", "domainsocket", "quic", "grpc", "gun", "raw"]:
+            return None
+            
+        if not host or not port:
+            return None
+            
         outbound = {
             "tag": name or f"vless-{host}:{port}",
             "protocol": "vless",
@@ -81,17 +92,17 @@ def parse_vless(uri):
                 }]
             },
             "streamSettings": {
-                "network": q.get("type", "tcp"),
-                "security": q.get("security", "none")
+                "network": network,
+                "security": security
             }
         }
         
-        if q.get("security") == "tls":
+        if security == "tls":
             outbound["streamSettings"]["tlsSettings"] = {
                 "serverName": q.get("sni", host),
                 "fingerprint": q.get("fp", "chrome")
             }
-        elif q.get("security") == "reality":
+        elif security == "reality":
             outbound["streamSettings"]["realitySettings"] = {
                 "serverName": q.get("sni", host),
                 "publicKey": q.get("pbk", ""),
@@ -116,6 +127,17 @@ def parse_vmess(uri):
         if not uri.startswith("vmess://"): return None
         js = json.loads(decode_base64(uri[8:]))
         
+        security = js.get("tls", "none")
+        if security not in ["none", "tls"]:
+            return None
+            
+        network = js.get("net", "tcp")
+        if network not in ["tcp", "kcp", "ws", "http", "domainsocket", "quic", "grpc", "gun", "raw"]:
+            return None
+            
+        if not js.get("add") or not js.get("port"):
+            return None
+            
         outbound = {
             "tag": js.get("ps", f"vmess-{js.get('add')}:{js.get('port')}"),
             "protocol": "vmess",
@@ -127,11 +149,11 @@ def parse_vmess(uri):
                 }]
             },
             "streamSettings": {
-                "network": js.get("net", "tcp"),
-                "security": js.get("tls", "none")
+                "network": network,
+                "security": security
             }
         }
-        if js.get("tls") == "tls":
+        if security == "tls":
             outbound["streamSettings"]["tlsSettings"] = {
                 "serverName": js.get("sni") or js.get("host") or js.get("add"),
                 "fingerprint": js.get("fp", "chrome")
@@ -155,8 +177,8 @@ def parse_uri(uri):
     return None
 
 def load_base_config():
-    config_path = os.path.join(PROJECT_ROOT, "config", "xray-config.json")
-    example_path = os.path.join(PROJECT_ROOT, "config", "xray-config.json.example")
+    config_path = os.path.join(PROJECT_ROOT, "xray", "xray-config.json")
+    example_path = os.path.join(PROJECT_ROOT, "xray", "xray-config.json.example")
     base_config = None
     
     if os.path.exists(config_path):
@@ -301,22 +323,61 @@ def get_outbound_key(ob):
         pass
     return None
 
+def get_container_status(service_name):
+    try:
+        res_id = subprocess.run(["docker", "compose", "ps", "-q", service_name], capture_output=True, text=True, cwd=PROJECT_ROOT)
+        cid = res_id.stdout.strip()
+        if not cid:
+            return "missing"
+            
+        res_state = subprocess.run(["docker", "inspect", "--format={{.State.Health.Status}}", cid], capture_output=True, text=True)
+        return res_state.stdout.strip()
+    except Exception:
+        return "error"
+
+def wait_for_healthy(service_name, timeout=20):
+    start_time = time.time()
+    logging.info(f"Waiting for {service_name} to become healthy...")
+    while time.time() - start_time < timeout:
+        state = get_container_status(service_name)
+        if state == "healthy":
+            logging.info(f"{service_name} is healthy.")
+            return True
+        time.sleep(1)
+    logging.warning(f"Timeout waiting for {service_name} to become healthy. Current state: {get_container_status(service_name)}")
+    return False
+
 def run_update_cycle(args):
-    url = "https://raw.githubusercontent.com/barry-far/V2ray-config/main/Sub1.txt"
+    urls = [
+        "https://raw.githubusercontent.com/barry-far/V2ray-config/main/Sub1.txt",
+        "https://raw.githubusercontent.com/barry-far/V2ray-config/main/Sub2.txt",
+        "https://raw.githubusercontent.com/mahdibland/ShadowsocksAggregator/master/Eternity",
+        "https://raw.githubusercontent.com/mahdibland/ShadowsocksAggregator/master/EternityAir",
+        "https://raw.githubusercontent.com/barry-far/V2ray-config/main/Sub3.txt"
+    ]
     logging.info("Starting update cycle...")
     
-    # 1. Fetch from sub
-    lines = fetch_sub(url)
+    # 1. Fetch from all subscription links
+    all_uris = []
+    for url in urls:
+        logging.info(f"Fetching subscription from: {url}")
+        uris = fetch_sub(url)
+        all_uris.extend(uris)
+        
+    # De-duplicate URIs to avoid testing identical links
+    unique_uris = list(dict.fromkeys(all_uris))
+    logging.info(f"Fetched {len(all_uris)} total URIs ({len(unique_uris)} unique).")
+    
     outbounds = []
-    for line in lines:
-        parsed = parse_uri(line)
+    for uri in unique_uris:
+        parsed = parse_uri(uri)
         if parsed:
             outbounds.append(parsed)
             
-    logging.info(f"Fetched and parsed {len(outbounds)} proxy configurations.")
+    logging.info(f"Successfully parsed {len(outbounds)} proxy configurations.")
     
     # Limit number of configs to test to keep setup manageable
-    test_outbounds = outbounds[:150]
+    test_outbounds = outbounds[:200]
     logging.info(f"Testing top {len(test_outbounds)} configurations in xray-lab...")
     
     # Ensure xray-lab data dir exists
@@ -324,13 +385,13 @@ def run_update_cycle(args):
     
     # 2. Generate lab config and restart xray-lab
     base_config = load_base_config()
-    lab_config_path = os.path.join(PROJECT_ROOT, "config", "xray-lab-config.json")
+    lab_config_path = os.path.join(PROJECT_ROOT, "xray", "xray-lab-config.json")
     generate_xray_config(test_outbounds, lab_config_path, base_config)
     
     try:
         logging.info("Restarting xray-lab container...")
         subprocess.run(["docker", "compose", "restart", "xray-lab"], check=True, cwd=PROJECT_ROOT)
-        time.sleep(3) # allow boot
+        wait_for_healthy("xray-lab")
     except Exception as e:
         logging.error(f"Failed to restart xray-lab container: {e}")
         return
@@ -350,7 +411,7 @@ def run_update_cycle(args):
     logging.info(f"xray-lab test complete: {len(healthy_lab_nodes)}/{len(lab_results)} nodes healthy.")
     
     # 4. Check main container health
-    main_config_path = os.path.join(PROJECT_ROOT, "config", "xray-config.json")
+    main_config_path = os.path.join(PROJECT_ROOT, "xray", "xray-config.json")
     main_exists = os.path.exists(main_config_path)
     
     healthy_main_nodes = []
@@ -407,6 +468,7 @@ def run_update_cycle(args):
             generate_xray_config(final_nodes, main_config_path, base_config)
             try:
                 subprocess.run(["docker", "compose", "restart", "xray"], check=True, cwd=PROJECT_ROOT)
+                wait_for_healthy("xray")
                 logging.info("Main xray container restarted and config updated.")
             except Exception as e:
                 logging.error(f"Failed to restart main xray container: {e}")

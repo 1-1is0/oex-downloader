@@ -13,24 +13,24 @@ WebUI (port 8080) binds to loopback only; accessed via SSH local-forward.
 
 ## Configuration flow
 
-1. **config/stack-settings.json** — user settings (WebUI port, PUID/PGID, SOCKS5 auth, VPS IP for leak detection, TUN interface name)
-2. **scripts/generate-env.sh** — reads stack-settings.json, writes .env with Docker Compose variables
-3. **config/xray-config.json** — xray routing (sourced from xray-config.json.example; requires PLACEHOLDER fills: VLESS server IP, UUID, Reality pubkey/shortId/SNI)
-4. **config/qbittorrent.conf** — qBittorrent template (seeded once to data/qbittorrent/config/qBittorrent/qBittorrent.conf)
-5. **scripts/verify.sh** — comprehensive health check: container states, egress IPs, UDP DNS, DoH reachability, kill-switch
+1. **stack-settings.json** — user settings (WebUI port, PUID/PGID, SOCKS5 auth, VPS IP for leak detection, TUN interface name)
+2. **generate-env.sh** — reads stack-settings.json, writes .env with Docker Compose variables
+3. **xray/xray-config.json** — xray routing (sourced from xray-config.json.example; requires PLACEHOLDER fills: VLESS server IP, UUID, Reality pubkey/shortId/SNI)
+4. **qbittorrent/qbittorrent.conf** — qBittorrent template (seeded once to data/qbittorrent/config/qBittorrent/qBittorrent.conf)
+5. **verify.sh** — comprehensive health check: container states, egress IPs, UDP DNS, DoH reachability, kill-switch
 
 ## Common commands
 
 ```bash
 # First-time setup (creates xray-config.json, qBittorrent.conf, .env from templates)
-bash scripts/bootstrap.sh
+bash bootstrap.sh
 
 # Edit your VLESS credentials and Reality settings
-$EDITOR config/xray-config.json
+$EDITOR xray/xray-config.json
 
 # Edit runtime settings (port, PUID/PGID, VPS IP for leak detection, etc.)
-$EDITOR config/stack-settings.json
-bash scripts/bootstrap.sh    # regenerates .env
+$EDITOR stack-settings.json
+bash bootstrap.sh    # regenerates .env
 
 # Start the stack
 docker compose up -d
@@ -41,8 +41,11 @@ docker compose logs xray --tail=20
 docker compose logs tun2socks --tail=20
 docker compose logs qbittorrent --tail=20
 
+# Run subscription manager manually (once, forcing config rebuild and main container reload)
+python3 sub-manager/sub-manager.py --once --force-update
+
 # Comprehensive verification (health, egress IP, DNS, DoH, kill-switch readiness)
-bash scripts/verify.sh
+bash verify.sh
 
 # Stop / restart
 docker compose stop [service]
@@ -66,7 +69,7 @@ docker compose up -d --remove-orphans
 
 ## Configuration placeholders
 
-**config/xray-config.json outbounds** — VLESS upstream must be filled:
+**xray/xray-config.json outbounds** — VLESS upstream must be filled:
 - `outbounds[0].settings.vnext[0].address` — VLESS server hostname/IP
 - `outbounds[0].settings.vnext[0].port` — VLESS port (usually 443)
 - `outbounds[0].settings.vnext[0].users[0].id` — Client UUID
@@ -90,13 +93,16 @@ If not using VLESS+Reality, replace the entire `vless-out` outbound with your pr
 | `NET_ADMIN` denied | LXC container without capability — need KVM-based VPS |
 | Healthcheck shows leak | Verify `vps_public_ip` in stack-settings.json; if correct, investigate routes |
 
-## Scripts
+## Component Directories & Scripts
 
-- **bootstrap.sh** — One-time init: copies xray-config.json.example → xray-config.json (if missing), seeds qBittorrent.conf, mkdir data dirs, calls generate-env.sh.
-- **generate-env.sh** — Reads config/stack-settings.json (JSON), writes .env with Docker Compose vars; requires jq or python3.
-- **verify.sh** — Multi-step health check: container states, egress IP, DNS/DoH reachability, leak detection, kill-switch readiness (skips step 8 manual magnet test).
-- **healthcheck-proxy.sh** — Container healthcheck script (runs inside tun2socks); checks TUN is up and SOCKS5 reachable.
-- **sub-manager.py** — Subscription manager (dev utility); parses base64-encoded proxy lists (v2ray, Clash formats), tests connectivity via downloaded xray binary.
+- **downloader/** — Multi-link downloader logic and Dockerfile context.
+- **sub-manager/** — Subscription manager logic and dependency declarations. Fetches configurations from multiple sources and tests them concurrently via the lab container.
+- **xray/** — Main and lab Xray configuration files, Dockerfile (custom Alpine with curl/jq), and parallel node testing shell script (`test-nodes.sh`).
+- **tun2socks/** — Healthcheck check scripts for SOCKS5 bridge container.
+- **qbittorrent/** — Client configuration files.
+- **bootstrap.sh** — Root script; one-time setup: copies templates, seeds config directories, and calls `generate-env.sh`.
+- **generate-env.sh** — Root script; parses `stack-settings.json` to generate `.env`.
+- **verify.sh** — Root script; runs the automated diagnostic check suite on the running compose stack.
 
 ## Development environment
 
@@ -113,11 +119,3 @@ Packages available in nix shells via devbox; can run `devbox shell` to enter iso
 - **deploy.yml** — playbook to orchestrate bootstrap, config, docker compose up
 - **inventory.ini** — VPS target hosts
 - **README.md** — deployment guide
-
-## File structure notes
-
-- **config/** — All user-editable config; stack-settings.json is the main knob
-- **data/** — Persistent volumes: xray state, qBittorrent config, torrent downloads
-- **.env** — Generated by generate-env.sh from stack-settings.json; controls Docker Compose substitutions; not committed
-- **docker-compose.yml** — Service definitions; uses env vars from .env for port/auth/paths
-- **scripts/** — Operational scripts (bootstrap, verify, healthcheck)

@@ -3,8 +3,7 @@
 # Skips step 8 (ipleak.net magnet test) — that's manual.
 set -u
 
-SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
-ROOT_DIR=$(cd "$SCRIPT_DIR/.." && pwd)
+ROOT_DIR=$(cd "$(dirname "$0")" && pwd)
 cd "$ROOT_DIR"
 
 PASS=0
@@ -66,7 +65,7 @@ fi
 echo
 echo "--- 8. DNS-over-HTTPS configured in xray ---"
 XRAY_CFG=""
-for c in config/xray-config.json config/xray-config.socks5-outbound.json; do
+for c in xray/xray-config.json xray/xray-config.socks5-outbound.json; do
   [ -f "$c" ] && XRAY_CFG="$c" && break
 done
 if [ -z "$XRAY_CFG" ]; then
